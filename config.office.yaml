@@ -1,0 +1,77 @@
+youtube:
+  url: "https://www.youtube.com/@tpcchannel"  # 台北市議會 YouTube 頻道，確認後填入直播 URL
+  reconnect_delay: 5
+
+audio:
+  sample_rate: 16000
+  chunk_sec: 20
+  overlap_sec: 5
+
+# 辦公室桌機：RTX 3060 12GB + i7-13700 (16 核) + 64GB RAM
+whisper:
+  model: "large-v3"
+  device: "cpu"            # GPU 留給 Ollama；13700 16 核跑 CPU int8 速度足夠
+  compute_type: "int8"
+  language: "zh"
+  num_workers: 8           # i7-13700 P-core 8 顆
+  initial_prompt: "台北市議會質詢紀錄。出席官員包括衛生局局長、台北市立聯合醫院院長。議員針對醫療政策進行質詢。"
+
+keywords:
+  high_confidence:
+    - "衛生局長"
+    - "聯醫院長"
+    - "聯合醫院院長"
+    - "請問局長"
+    - "請院長回答"
+  low_confidence:
+    - "局長"
+    - "衛生"
+    - "聯合醫院"
+    - "聯醫"
+  targets:                 # 現任官員姓名，需隨任期更新
+    - "黃世傑"             # 現任衛生局長
+    - ""                   # 現任聯醫院長姓名（請填入）
+
+session:
+  silence_timeout_sec: 60
+  min_duration_sec: 30
+
+# 辦公室桌機：12GB VRAM，改用 12B（27B 需 ~16GB，裝不下）
+ollama:
+  host: "http://localhost:11434"
+  summary_model: "gemma3:12b-it-q4_K_M"
+  classify_model: "gemma3:1b-it-q8_0"
+
+notification:
+  email:
+    smtp_host: "mail.gov.taipei"   # 市府郵件伺服器
+    smtp_port: 587
+    use_tls: true
+    username: "council-monitor@health.gov.taipei"
+    # 密碼建議用環境變數 SMTP_PASSWORD，此欄留空
+    password: ""
+    from: "council-monitor@health.gov.taipei"
+    from_name: "議會質詢監控系統"
+
+    # 立即級：同時寄給主責單位 + 院長室
+    director_emails:             # 院長室/局長室（立即級必抄送）
+      - ""                       # 請填入院長 email
+
+    # 各單位聯絡人（主責單位從此取收件人）
+    contacts:
+      聯醫-仁愛:    []
+      聯醫-中興:    []
+      聯醫-忠孝:    []
+      聯醫-松德:    []
+      聯醫-陽明:    []
+      聯醫-婦幼:    []
+      聯醫-和平:    []
+      衛生局政策:   []
+
+    # 週報收件人（每週五自動發送）
+    digest_recipients:
+      - ""                       # 請填入局長/院長 email
+
+storage:
+  db_path: "council_monitor.db"
+  transcript_dir: "transcripts"
