@@ -1,0 +1,19 @@
+# P1 - 音訊串流 + ASR
+yt-dlp>=2024.1.0
+faster-whisper>=1.0.0
+numpy>=1.24.0
+pyyaml>=6.0
+
+# P2 - 關鍵詞偵測
+# (無額外依賴，使用標準 re 模組)
+
+# P3 - LLM 摘要 + 分派
+ollama>=0.3.0
+pydantic>=2.0.0
+
+# P4 - 通知 + 存檔
+requests>=2.31.0        # LINE Notify
+# smtplib 是標準庫，無需安裝
+
+# 工具
+loguru>=0.7.0           # 結構化 logging
