@@ -60,8 +60,14 @@ pip install -r requirements.txt
 
 # 2. 安裝 Ollama 並下載模型
 curl -fsSL https://ollama.com/install.sh | sh
+
+# KNEO 350（RTX 5060 Ti ×4，VRAM 充裕）
 ollama pull gemma3:27b-it-q4_K_M   # 摘要生成
 ollama pull gemma3:1b-it-q8_0      # 單位分派
+
+# 辦公室桌機（RTX 3060 12GB）→ 改用 12B
+ollama pull gemma3:12b-it-q4_K_M   # 摘要生成（12GB VRAM 適用）
+ollama pull gemma3:1b-it-q8_0      # 單位分派（不變）
 
 # 3. 設定 SMTP 密碼（不寫進 config）
 export SMTP_PASSWORD="your_password"
@@ -102,7 +108,8 @@ python main.py --stage p3 --test-text              # 驗證摘要 + 分派
 python main.py --stage p4 --test-text              # 完整流程含存檔
 
 # 正式監控
-python main.py --stage p4                          # 接 YouTube 直播
+python main.py --stage p4                          # 接 YouTube 直播（KNEO 350）
+python main.py --config config.office.yaml --stage p4  # 辦公室桌機
 
 # 週報
 python main.py --digest                            # 手動觸發週報
