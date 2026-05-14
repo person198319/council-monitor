@@ -172,7 +172,7 @@ python3 main.py --digest
 ```
 # 仁愛急診壅塞改善進度
 日期：2026-05-14　議員：林XX
-對象：王智弘院長　緊急：本週
+對象：醫院長官　緊急：本週
 影片時間：30:23 – 36:45
 YouTube 連結：https://youtube.com/watch?v=F9oZ-9zY4c8&t=1823
 
