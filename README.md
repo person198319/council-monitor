@@ -17,10 +17,13 @@
 
 ```
 YouTube 直播
-    │  yt-dlp + ffmpeg
+    │  yt-dlp（Node.js PO Token）+ ffmpeg
     ▼
-faster-whisper（CPU）
-    │  中文即時逐字稿
+faster-whisper（CPU / CUDA）
+    │  中文即時逐字稿（帶直播絕對時間戳）
+    ▼
+說話者識別（SpeakerTracker）
+    │  語法模式 → 角色推斷（議員/官員）→ 已知人物識別 + 回填
     ▼
 關鍵詞偵測（三層）
     │  高信心詞 / 語法判斷 / 滑動視窗
@@ -33,44 +36,67 @@ Gemma 27B（Ollama）
     ▼
 單位分派（規則引擎 → Gemma 1B fallback）
     │
-├── Email 通知（立即 / 本週）
-├── SQLite 存檔 + 逐字稿 txt
-└── 週報（每週五彙整寄送）
+├── notices/ 通知檔案（txt + json）
+├── SQLite 存檔 + 逐字稿 txt（含 YouTube 跳轉連結）
+└── 週報（每週五彙整）
 ```
 
 ---
 
 ## 硬體需求
 
-| 元件 | 規格 | 用途 |
+| 環境 | 規格 | 用途 |
 |------|------|------|
-| CPU | 多核（建議 8+ 核） | faster-whisper int8 + 系統協調 |
-| GPU | ≥ 16GB VRAM（×1 以上） | Gemma 27B Q4 推論 |
-| RAM | ≥ 32GB | 模型載入緩衝 |
-
-> 開發與測試環境：KNEO 350（AMD EPYC 9115, RTX 5060 Ti ×4, 128GB RAM）
+| 開發 / 測試 | 任何有 WSL Ubuntu 的 Windows PC | P1/P2 驗證 |
+| 辦公室機房 | i7-13700K + RTX 3060 12GB + 64GB RAM | 正式監控 |
+| 未來擴充 | KNEO 350（EPYC 9115, RTX 5060 Ti ×4, 128GB） | 多卡分工 |
 
 ---
 
 ## 安裝
 
-```bash
-# 1. 安裝 Python 依賴
-pip install -r requirements.txt
+### 前置需求
 
-# 2. 安裝 Ollama 並下載模型
+**Windows + WSL Ubuntu**（Node.js 透過 WSL 解決 YouTube PO Token 問題）：
+
+```powershell
+# PowerShell（系統管理員）
+wsl --install -d Ubuntu
+```
+
+```bash
+# Ubuntu WSL 內
+curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+sudo apt install -y nodejs ffmpeg python3.14-venv
+
+node --version   # 應顯示 v22.x.x
+ffmpeg -version
+```
+
+### Python 環境
+
+```bash
+# venv 建在 Linux 本機（避免 Windows 掛載磁碟的權限問題）
+python3 -m venv ~/council-venv
+source ~/council-venv/bin/activate
+
+cd /mnt/d/claude/council-monitor-main   # 依實際路徑調整
+pip install -r requirements.txt
+```
+
+### Ollama 模型
+
+```bash
+# 安裝 Ollama（Linux）
 curl -fsSL https://ollama.com/install.sh | sh
+
+# 機房桌機（RTX 3060 12GB）
+ollama pull gemma3:12b-it-q4_K_M   # 摘要生成
+ollama pull gemma3:1b-it-q8_0      # 單位分派
 
 # KNEO 350（RTX 5060 Ti ×4，VRAM 充裕）
 ollama pull gemma3:27b-it-q4_K_M   # 摘要生成
 ollama pull gemma3:1b-it-q8_0      # 單位分派
-
-# 辦公室桌機（RTX 3060 12GB）→ 改用 12B
-ollama pull gemma3:12b-it-q4_K_M   # 摘要生成（12GB VRAM 適用）
-ollama pull gemma3:1b-it-q8_0      # 單位分派（不變）
-
-# 3. 設定 SMTP 密碼（不寫進 config）
-export SMTP_PASSWORD="your_password"
 ```
 
 ---
@@ -80,19 +106,17 @@ export SMTP_PASSWORD="your_password"
 編輯 `config.yaml`，至少填寫：
 
 ```yaml
-keywords:
-  targets:
-    - "黃世傑"    # 現任衛生局長（隨任期更新）
-    - "XXX"       # 現任聯醫院長
+youtube:
+  url: "https://www.youtube.com/watch?v=直播ID"
 
-notification:
-  email:
-    contacts:
-      聯醫-仁愛: ["admin@renai.gov.taipei"]
-      # ... 其他院區
-    director_emails: ["director@health.gov.taipei"]
-    digest_recipients: ["director@health.gov.taipei"]
+whisper:
+  model: "medium"      # CPU 環境；GPU 環境改 large-v3
+  device: "cpu"        # GPU 環境改 cuda
+  compute_type: "int8" # GPU 環境改 float16
 ```
+
+已知說話者（王智弘院長 / 黃建華局長）定義在 `data/known_speakers.py`，
+隨人事異動直接編輯該檔即可，不需動程式邏輯。
 
 `data/dispatch_rules.py` 的業務關鍵詞需各院區業務人員審閱確認。
 
@@ -101,19 +125,44 @@ notification:
 ## 使用方式
 
 ```bash
-# 逐步驗證（建議順序）
-python main.py --stage p1 --test-file sample.wav   # 驗證 ASR 品質
-python main.py --stage p2 --test-text              # 驗證關鍵詞偵測
-python main.py --stage p3 --test-text              # 驗證摘要 + 分派
-python main.py --stage p4 --test-text              # 完整流程含存檔
+# 啟動 WSL venv
+source ~/council-venv/bin/activate
+cd /mnt/d/claude/council-monitor-main   # 依實際路徑調整
 
-# 正式監控
-python main.py --stage p4                          # 接 YouTube 直播（KNEO 350）
-python main.py --config config.office.yaml --stage p4  # 辦公室桌機
+# 逐步驗證（建議順序）
+python3 main.py --stage p1 --test-file sample.wav   # 驗證 ASR + 時間戳
+python3 main.py --stage p2 --test-text              # 驗證關鍵詞偵測
+python3 main.py --stage p3 --test-text              # 驗證摘要 + 分派
+python3 main.py --stage p4 --test-text              # 完整流程含存檔
+
+# 正式監控（接 YouTube 直播）
+python3 main.py --stage p2                          # 有直播時監控
+python3 main.py --stage p4                          # 含摘要 + 存檔
 
 # 週報
-python main.py --digest                            # 手動觸發週報
+python3 main.py --digest
 ```
+
+---
+
+## 輸出範例
+
+存檔後的逐字稿 `transcripts/2026-05-14_*.txt`：
+
+```
+# 仁愛急診壅塞改善進度
+日期：2026-05-14　議員：林XX
+對象：王智弘院長　緊急：本週
+影片時間：30:23 – 36:45
+YouTube 連結：https://youtube.com/watch?v=F9oZ-9zY4c8&t=1823
+
+[30:23–30:31][議員] 請問院長，仁愛急診等候超過四小時
+[30:31–30:45][王智弘院長] 是的，我們聯醫已增派兩名急診醫師
+[30:47–31:02][王智弘院長] 預計下個月完成分流機制調整
+[31:04–31:18][王智弘院長] 兩週內提交書面報告給議員辦公室
+```
+
+YouTube 連結點開直接跳到質詢時間點。
 
 ---
 
@@ -121,10 +170,10 @@ python main.py --digest                            # 手動觸發週報
 
 | 階段 | 內容 | 狀態 |
 |------|------|------|
-| P1 | YouTube 串流擷取 + faster-whisper ASR | ✅ |
-| P2 | 三層關鍵詞偵測 + Session 狀態機 | ✅ |
-| P3 | Gemma 27B 摘要 + 單位分派規則引擎 | ✅ |
-| P4 | Email 通知 + SQLite 存檔 + 週報 | ✅ |
+| P1 | YouTube 串流擷取 + faster-whisper ASR + 絕對時間戳 | ✅ |
+| P2 | 三層關鍵詞偵測 + Session 狀態機 + 說話者識別 | ✅ |
+| P3 | Gemma 摘要 + 單位分派規則引擎 | ✅ |
+| P4 | notices/ 通知檔案 + SQLite 存檔 + 週報 | ✅ |
 
 ---
 
@@ -132,24 +181,26 @@ python main.py --digest                            # 手動觸發週報
 
 ```
 council-monitor/
-├── main.py                 # 主程式入口
-├── config.yaml             # 設定（需填寫聯絡人等）
+├── main.py                   # 主程式入口（P1–P4）
+├── config.yaml               # 設定（需填寫直播 URL 等）
 ├── requirements.txt
 ├── pipeline/
-│   ├── audio_stream.py     # yt-dlp + ffmpeg 串流
-│   ├── transcriber.py      # faster-whisper ASR
-│   ├── keyword_detector.py # 三層偵測
-│   └── session_manager.py  # Session 狀態機
+│   ├── audio_stream.py       # yt-dlp + ffmpeg 串流（帶時間戳 offset）
+│   ├── transcriber.py        # faster-whisper ASR（絕對時間戳）
+│   ├── keyword_detector.py   # 三層偵測（高信心 / 語法 / 共現）
+│   ├── session_manager.py    # Session 狀態機（含說話者追蹤）
+│   └── speaker_tracker.py    # 文字型說話者識別 + 回填
 ├── analysis/
-│   ├── summarizer.py       # Gemma 27B 摘要（Ollama）
-│   └── dispatcher.py       # 單位分派（規則 + LLM）
+│   ├── summarizer.py         # Gemma 摘要（Ollama）
+│   └── dispatcher.py         # 單位分派（規則 + LLM）
 ├── output/
-│   ├── notifier.py         # Email 通知
-│   ├── storage.py          # SQLite + 逐字稿 txt
-│   └── digest.py           # 週報生成
+│   ├── notifier.py           # notices/ 通知檔案（txt + json）
+│   ├── storage.py            # SQLite + 逐字稿 txt + YouTube 跳轉連結
+│   └── digest.py             # 週報生成
 └── data/
-    ├── dispatch_rules.py   # 聯醫單位對照表（需人工維護）
-    └── corrections.py      # ASR 誤辨修正詞表
+    ├── known_speakers.py     # 已知說話者（王智弘院長、黃建華局長）
+    ├── dispatch_rules.py     # 聯醫單位對照表（需人工維護）
+    └── corrections.py        # ASR 誤辨修正詞表
 ```
 
 ---
@@ -157,8 +208,8 @@ council-monitor/
 ## 注意事項
 
 - 逐字稿與 SQLite 資料庫含議員質詢內容，**不納入版控**（已加入 `.gitignore`）
-- SMTP 密碼請用環境變數 `SMTP_PASSWORD`，勿寫入 `config.yaml`
 - `data/dispatch_rules.py` 的業務關鍵詞為虛構範本，上線前需各院業務人員校對
+- `data/known_speakers.py` 隨人事異動更新（局長 / 院長姓名）
 
 ---
 
