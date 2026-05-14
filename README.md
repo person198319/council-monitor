@@ -124,10 +124,30 @@ whisper:
 
 ## 使用方式
 
+### 網頁服務（推薦，供行政同仁使用）
+
 ```bash
 # 啟動 WSL venv
 source ~/council-venv/bin/activate
-cd /mnt/d/claude/council-monitor-main   # 依實際路徑調整
+cd /mnt/e/claude/council-monitor   # 依實際路徑調整
+
+# 啟動 web 服務
+python3 web/app.py
+# 瀏覽器開啟 http://localhost:8000
+```
+
+功能說明：
+- 貼入 YouTube 直播或錄影網址 → 即時逐字稿
+- 多人同時開啟同一網址，共用同一畫面
+- 點擊說話者標籤可手動輸入姓名，自動套用至同一說話群組的所有發言
+- 每段 Session 結束後可選擇「生成摘要」（需 Ollama 服務運行）
+
+### 命令列模式（開發 / 除錯用）
+
+```bash
+# 啟動 WSL venv
+source ~/council-venv/bin/activate
+cd /mnt/e/claude/council-monitor   # 依實際路徑調整
 
 # 逐步驗證（建議順序）
 python3 main.py --stage p1 --test-file sample.wav   # 驗證 ASR + 時間戳
@@ -181,9 +201,13 @@ YouTube 連結點開直接跳到質詢時間點。
 
 ```
 council-monitor/
-├── main.py                   # 主程式入口（P1–P4）
+├── main.py                   # 主程式入口（P1–P4，命令列模式）
 ├── config.yaml               # 設定（需填寫直播 URL 等）
 ├── requirements.txt
+├── web/
+│   └── app.py                # FastAPI + WebSocket 網頁服務入口
+├── static/
+│   └── index.html            # 純 HTML 前端（無 framework）
 ├── pipeline/
 │   ├── audio_stream.py       # yt-dlp + ffmpeg 串流（帶時間戳 offset）
 │   ├── transcriber.py        # faster-whisper ASR（絕對時間戳）
