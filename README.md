@@ -115,7 +115,7 @@ whisper:
   compute_type: "int8" # GPU 環境改 float16
 ```
 
-已知說話者（王智弘院長 / 黃建華局長）定義在 `data/known_speakers.py`，
+已知說話者（衛生局長 / 聯醫院長）定義在 `data/known_speakers.py`，
 隨人事異動直接編輯該檔即可，不需動程式邏輯。
 
 `data/dispatch_rules.py` 的業務關鍵詞需各院區業務人員審閱確認。
@@ -157,9 +157,9 @@ python3 main.py --digest
 YouTube 連結：https://youtube.com/watch?v=F9oZ-9zY4c8&t=1823
 
 [30:23–30:31][議員] 請問院長，仁愛急診等候超過四小時
-[30:31–30:45][王智弘院長] 是的，我們聯醫已增派兩名急診醫師
-[30:47–31:02][王智弘院長] 預計下個月完成分流機制調整
-[31:04–31:18][王智弘院長] 兩週內提交書面報告給議員辦公室
+[30:31–30:45][聯醫院長] 是的，我們聯醫已增派兩名急診醫師
+[30:47–31:02][聯醫院長] 預計下個月完成分流機制調整
+[31:04–31:18][聯醫院長] 兩週內提交書面報告給議員辦公室
 ```
 
 YouTube 連結點開直接跳到質詢時間點。
@@ -198,7 +198,7 @@ council-monitor/
 │   ├── storage.py            # SQLite + 逐字稿 txt + YouTube 跳轉連結
 │   └── digest.py             # 週報生成
 └── data/
-    ├── known_speakers.py     # 已知說話者（王智弘院長、黃建華局長）
+    ├── known_speakers.py     # 已知說話者（衛生局長、聯醫院長，需自行填入）
     ├── dispatch_rules.py     # 聯醫單位對照表（需人工維護）
     └── corrections.py        # ASR 誤辨修正詞表
 ```
@@ -209,7 +209,7 @@ council-monitor/
 
 - 逐字稿與 SQLite 資料庫含議員質詢內容，**不納入版控**（已加入 `.gitignore`）
 - `data/dispatch_rules.py` 的業務關鍵詞為虛構範本，上線前需各院業務人員校對
-- `data/known_speakers.py` 隨人事異動更新（局長 / 院長姓名）
+- `data/known_speakers.py` 隨人事異動更新（局長 / 院長姓名，不納入版控建議）
 
 ---
 
