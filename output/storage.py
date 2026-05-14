@@ -2,7 +2,7 @@
 P4 - SQLite 存檔 + 逐字稿 txt
 
 資料表：
-  sessions     - 每筆質詢主記錄
+  sessions     - 每筆質詢主記錄（含影片時間範圍）
   commitments  - 承諾事項（可獨立追蹤狀態）
   dispatches   - 分派記錄（主責/協辦）
 """
@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     urgency         TEXT,
     emotion         TEXT,
     key_numbers     TEXT,   -- JSON
+    video_start_sec REAL,
+    video_end_sec   REAL,
     created_at      TEXT
 );
 
@@ -57,11 +59,22 @@ CREATE INDEX IF NOT EXISTS idx_commit_status    ON commitments(status);
 CREATE INDEX IF NOT EXISTS idx_commit_deadline  ON commitments(deadline);
 """
 
+_MIGRATE_SQL = [
+    "ALTER TABLE sessions ADD COLUMN video_start_sec REAL",
+    "ALTER TABLE sessions ADD COLUMN video_end_sec   REAL",
+]
+
 
 def _get_conn(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(_DDL)
+    # 為既有資料庫補欄位（忽略已存在的錯誤）
+    for sql in _MIGRATE_SQL:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     return conn
 
@@ -77,32 +90,46 @@ def _session_id(summary: SessionSummary) -> str:
     return f"{ts}_{slug}"
 
 
+def _fmt(sec: float) -> str:
+    sec = int(sec)
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
 def save_session(
     summary: SessionSummary,
     dispatch: DispatchResult,
-    transcript: str,
+    session: dict,
     cfg: dict,
 ) -> str:
     """
     存入 SQLite 並寫逐字稿 txt。
+    session 為 SessionManager._end() 回傳的完整 dict。
     回傳 session_id。
     """
     db_path = cfg["storage"]["db_path"]
     transcript_dir = cfg["storage"]["transcript_dir"]
+    youtube_url = cfg.get("youtube", {}).get("url", "")
     Path(transcript_dir).mkdir(exist_ok=True)
 
     sid = _session_id(summary)
     now = datetime.now().isoformat()
     today = now[:10]
 
+    video_start = session.get("video_start_sec", 0.0)
+    video_end   = session.get("video_end_sec",   0.0)
+
     conn = _get_conn(db_path)
     try:
-        # sessions
         conn.execute(
             """INSERT INTO sessions
                (id, date, councilor, target, topic, summary, response,
-                urgency, emotion, key_numbers, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                urgency, emotion, key_numbers,
+                video_start_sec, video_end_sec, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 sid, today,
                 summary.議員姓名, summary.質詢對象,
@@ -110,11 +137,11 @@ def save_session(
                 summary.局方回應, summary.緊急程度,
                 summary.情緒張力,
                 json.dumps(summary.關鍵數字, ensure_ascii=False),
+                video_start, video_end,
                 now,
             ),
         )
 
-        # commitments
         deadline = _deadline(summary.緊急程度)
         primary_unit = dispatch.primary[0] if dispatch.primary else "未分派"
         for item in summary.承諾事項:
@@ -125,7 +152,6 @@ def save_session(
                 (sid, item, deadline, "待處理", primary_unit, now),
             )
 
-        # dispatches
         for unit in dispatch.primary:
             conn.execute(
                 "INSERT INTO dispatches (session_id, unit, role, source, confidence)"
@@ -143,11 +169,25 @@ def save_session(
 
         # 逐字稿 txt
         txt_path = os.path.join(transcript_dir, f"{today}_{sid}.txt")
+        timestamped = session.get(
+            "timestamped_transcript",
+            session.get("transcript", ""),
+        )
+
+        jump_url = ""
+        if youtube_url and video_start:
+            from pipeline.audio_stream import get_youtube_jump_url
+            jump_url = get_youtube_jump_url(youtube_url, video_start)
+
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(f"# {summary.質詢主題}\n")
             f.write(f"日期：{today}　議員：{summary.議員姓名}\n")
-            f.write(f"對象：{summary.質詢對象}　緊急：{summary.緊急程度}\n\n")
-            f.write(transcript)
+            f.write(f"對象：{summary.質詢對象}　緊急：{summary.緊急程度}\n")
+            f.write(f"影片時間：{_fmt(video_start)} – {_fmt(video_end)}\n")
+            if jump_url:
+                f.write(f"YouTube 連結：{jump_url}\n")
+            f.write("\n")
+            f.write(timestamped)
 
         logger.info(f"存檔完成｜session_id：{sid}｜逐字稿：{txt_path}")
         return sid

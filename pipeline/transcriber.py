@@ -1,6 +1,9 @@
 """
 P1 - faster-whisper 即時逐字稿
-producer-consumer 架構：音訊 queue → 轉錄 → 結果 queue
+producer-consumer 架構：(音訊, offset) queue → 轉錄 → 結果 queue
+
+chunk_offset_sec 是該 chunk 的直播絕對起始秒數，
+加上 Whisper 輸出的相對時間後得到影片的絕對時間戳。
 """
 import queue
 import threading
@@ -30,16 +33,16 @@ class Transcriber:
         self.language = language
         self.initial_prompt = initial_prompt
 
-        self._audio_q: queue.Queue[np.ndarray | None] = queue.Queue(maxsize=10)
+        self._audio_q: queue.Queue[tuple[np.ndarray, float] | None] = queue.Queue(maxsize=10)
         self._result_q: queue.Queue[dict] = queue.Queue()
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
         logger.info("Transcriber 啟動完成")
 
-    def feed(self, audio: np.ndarray) -> None:
-        """送入一段音訊（非阻塞，若 queue 滿則丟棄並警告）"""
+    def feed(self, audio: np.ndarray, chunk_offset_sec: float = 0.0) -> None:
+        """送入一段音訊與對應的直播時間偏移（非阻塞，若 queue 滿則丟棄並警告）"""
         try:
-            self._audio_q.put(audio, timeout=2)
+            self._audio_q.put((audio, chunk_offset_sec), timeout=2)
         except queue.Full:
             logger.warning("轉錄 queue 已滿，丟棄一段音訊（推論跟不上串流速度）")
 
@@ -56,14 +59,15 @@ class Transcriber:
 
     def _run(self) -> None:
         while True:
-            audio = self._audio_q.get()
-            if audio is None:
+            item = self._audio_q.get()
+            if item is None:
                 break
-            self._transcribe(audio)
+            audio, chunk_offset = item
+            self._transcribe(audio, chunk_offset)
 
-    def _transcribe(self, audio: np.ndarray) -> None:
+    def _transcribe(self, audio: np.ndarray, chunk_offset: float) -> None:
         try:
-            segments, info = self.model.transcribe(
+            segments, _ = self.model.transcribe(
                 audio,
                 language=self.language,
                 initial_prompt=self.initial_prompt,
@@ -78,19 +82,22 @@ class Transcriber:
                 if not text:
                     continue
 
-                # 低信心詞標記
+                # 加上 chunk 起始偏移，換算成直播絕對時間
+                abs_start = round(chunk_offset + seg.start, 1)
+                abs_end   = round(chunk_offset + seg.end,   1)
+
                 low_conf_words = [
                     w.word for w in seg.words if w.probability < 0.4
                 ] if seg.words else []
 
                 result = {
-                    "text": text,
-                    "start": round(seg.start, 1),
-                    "end": round(seg.end, 1),
+                    "text":           text,
+                    "start":          abs_start,
+                    "end":            abs_end,
                     "low_conf_words": low_conf_words,
                 }
                 self._result_q.put(result)
-                logger.debug(f"[{seg.start:.1f}s] {text}")
+                logger.debug(f"[{abs_start:.1f}s] {text}")
 
         except Exception as e:
             logger.error(f"轉錄失敗：{e}")
