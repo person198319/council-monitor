@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>議會質詢監控系統</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue:   #1a56db;
+    --blue-l: #e8f0fe;
+    --green:  #057a55;
+    --red:    #c81e1e;
+    --amber:  #b45309;
+    --gray-1: #f9fafb;
+    --gray-2: #f3f4f6;
+    --gray-3: #e5e7eb;
+    --gray-5: #6b7280;
+    --gray-7: #374151;
+    --gray-9: #111827;
+    --radius: 6px;
+    --shadow: 0 1px 3px rgba(0,0,0,.12);
+  }
+
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft JhengHei", sans-serif;
+    font-size: 14px;
+    color: var(--gray-9);
+    background: var(--gray-2);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--blue);
+    color: #fff;
+    padding: 0 20px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,.2);
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: .5px; flex: 1; }
+  #status-badge {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 500;
+  }
+  #status-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: #9ca3af; transition: background .3s;
+  }
+  #status-dot.running  { background: #34d399; animation: pulse 1.5s infinite; }
+  #status-dot.analyzing { background: #fbbf24; animation: pulse 1s infinite; }
+  #status-dot.stopped  { background: #9ca3af; }
+  @keyframes pulse {
+    0%,100% { opacity: 1; } 50% { opacity: .4; }
+  }
+  #ws-indicator { font-size: 11px; opacity: .7; }
+
+  /* ── Control bar ── */
+  #control {
+    background: #fff;
+    border-bottom: 1px solid var(--gray-3);
+    padding: 10px 20px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  #url-input {
+    flex: 1;
+    padding: 7px 12px;
+    border: 1px solid var(--gray-3);
+    border-radius: var(--radius);
+    font-size: 14px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  #url-input:focus { border-color: var(--blue); }
+  #url-input::placeholder { color: var(--gray-5); }
+
+  button {
+    padding: 7px 16px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity .15s, background .15s;
+    white-space: nowrap;
+  }
+  button:hover { opacity: .88; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+
+  #btn-start { background: var(--blue); color: #fff; }
+  #btn-stop  { background: var(--red);  color: #fff; }
+  #btn-clear { background: var(--gray-2); color: var(--gray-7); border: 1px solid var(--gray-3); }
+
+  /* ── Main layout ── */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  /* ── Transcript panel ── */
+  #transcript-panel {
+    background: #fff;
+    border-right: 1px solid var(--gray-3);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 10px 16px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gray-7);
+    border-bottom: 1px solid var(--gray-3);
+    background: var(--gray-1);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .panel-header span { flex: 1; }
+  #segment-count { font-size: 12px; color: var(--gray-5); font-weight: 400; }
+
+  #transcript-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    scroll-behavior: smooth;
+  }
+
+  .seg-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 16px;
+    line-height: 1.5;
+    border-left: 3px solid transparent;
+    transition: background .15s;
+  }
+  .seg-row:hover { background: var(--gray-1); }
+  .seg-row.recording { border-left-color: #ef4444; background: #fff5f5; }
+
+  .seg-time {
+    font-size: 11px;
+    color: var(--gray-5);
+    white-space: nowrap;
+    font-family: monospace;
+    flex-shrink: 0;
+    min-width: 52px;
+  }
+
+  .seg-speaker {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color .15s, background .15s;
+    min-width: 48px;
+    text-align: center;
+  }
+  .seg-speaker:hover { border-color: var(--blue); background: var(--blue-l); }
+  .seg-speaker.role-councilor { background: #eff6ff; color: #1d4ed8; }
+  .seg-speaker.role-official  { background: #f0fdf4; color: #166534; }
+  .seg-speaker.role-chair     { background: #fefce8; color: #854d0e; }
+  .seg-speaker.role-unknown   { background: var(--gray-2); color: var(--gray-5); }
+  .seg-speaker.named          { background: #f0fdf4; color: #166534; border-color: #86efac; }
+
+  .seg-speaker-input {
+    font-size: 11px; font-weight: 600;
+    width: 80px;
+    padding: 1px 5px;
+    border: 1px solid var(--blue);
+    border-radius: 3px;
+    outline: none;
+    background: #fff;
+  }
+
+  .seg-text {
+    flex: 1;
+    color: var(--gray-9);
+  }
+  .seg-text .low-conf { color: #b45309; text-decoration: underline dotted; }
+
+  #auto-scroll-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: var(--blue);
+    color: #fff;
+    border: none;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .3s;
+    pointer-events: none;
+  }
+  #auto-scroll-btn.visible { opacity: 1; pointer-events: auto; }
+  #transcript-panel { position: relative; }
+
+  /* ── Sessions panel ── */
+  #sessions-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--gray-1);
+  }
+
+  #sessions-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .session-card {
+    background: #fff;
+    border: 1px solid var(--gray-3);
+    border-radius: var(--radius);
+    padding: 12px;
+    box-shadow: var(--shadow);
+  }
+  .session-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .session-num {
+    background: var(--blue);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .session-time { font-size: 12px; color: var(--gray-5); flex: 1; }
+  .session-meta { font-size: 12px; color: var(--gray-7); margin-bottom: 8px; line-height: 1.6; }
+  .session-meta span { margin-right: 8px; }
+
+  .urgency-立即 { color: var(--red); font-weight: 600; }
+  .urgency-本週 { color: var(--amber); font-weight: 600; }
+  .urgency-本月 { color: var(--green); }
+
+  .btn-summary {
+    background: var(--blue-l);
+    color: var(--blue);
+    border: 1px solid #bfdbfe;
+    font-size: 12px;
+    padding: 5px 12px;
+    width: 100%;
+    margin-top: 6px;
+  }
+  .btn-summary:hover { background: #dbeafe; }
+  .btn-summary.loading { opacity: .5; cursor: wait; }
+
+  .summary-box {
+    margin-top: 10px;
+    padding: 10px;
+    background: var(--gray-1);
+    border: 1px solid var(--gray-3);
+    border-radius: var(--radius);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .summary-box h4 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .summary-box .label { color: var(--gray-5); font-size: 11px; }
+  .summary-box .value { color: var(--gray-9); }
+  .summary-box ul { padding-left: 16px; }
+  .summary-box li { margin-bottom: 2px; }
+
+  .empty-hint {
+    text-align: center;
+    color: var(--gray-5);
+    font-size: 13px;
+    padding: 40px 20px;
+    line-height: 2;
+  }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--gray-9);
+    color: #fff;
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity .3s, transform .3s;
+    pointer-events: none;
+    z-index: 100;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏥 議會質詢監控系統</h1>
+  <div id="status-badge">
+    <div id="status-dot" class="stopped"></div>
+    <span id="status-text">待機</span>
+  </div>
+  <span id="ws-indicator">⚪ 連線中...</span>
+</header>
+
+<div id="control">
+  <input id="url-input" type="text"
+    placeholder="YouTube 直播或錄影網址，例如 https://www.youtube.com/watch?v=..." />
+  <button id="btn-start" onclick="startMonitor()">開始監控</button>
+  <button id="btn-stop"  onclick="stopMonitor()" disabled>停止</button>
+  <button id="btn-clear" onclick="clearAll()">清除</button>
+</div>
+
+<main>
+  <div id="transcript-panel">
+    <div class="panel-header">
+      <span>📝 即時逐字稿</span>
+      <span id="segment-count">0 段</span>
+      <span style="font-size:11px;color:var(--gray-5)">點擊說話者標籤可編輯姓名</span>
+    </div>
+    <div id="transcript-list"></div>
+    <button id="auto-scroll-btn" onclick="scrollToBottom()">↓ 最新內容</button>
+  </div>
+
+  <div id="sessions-panel">
+    <div class="panel-header">
+      <span>📋 質詢記錄</span>
+      <span id="session-count" style="font-size:12px;color:var(--gray-5);font-weight:400">0 筆</span>
+    </div>
+    <div id="sessions-list">
+      <div class="empty-hint">等待質詢 session 觸發<br>偵測到局長 / 院長被質詢時<br>自動開始記錄</div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ── 狀態 ──────────────────────────────────────
+let ws = null;
+let autoScroll = true;
+let segments = [];     // { segment_id, group_id, role, speaker_name, start, end, text, ... }
+let sessions = [];
+
+// ── WebSocket ────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('ws-indicator').textContent = '🟢 已連線';
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-indicator').textContent = '🔴 已斷線';
+    setTimeout(connectWS, 3000);
+  };
+  ws.onmessage = e => handleMessage(JSON.parse(e.data));
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'init':
+      segments = msg.data.segments || [];
+      sessions = msg.data.sessions || [];
+      setStatus(msg.data.status || 'stopped');
+      rebuildTranscript();
+      rebuildSessions();
+      break;
+    case 'status':
+      setStatus(msg.data.status);
+      break;
+    case 'segment':
+      segments.push(msg.data);
+      appendSegmentRow(msg.data);
+      updateSegmentCount();
+      if (autoScroll) scrollToBottom();
+      break;
+    case 'session_end':
+      sessions.push(msg.data);
+      appendSessionCard(msg.data);
+      updateSessionCount();
+      showToast(`✅ 質詢 session #${msg.data.session_id + 1} 完結（${msg.data.duration_sec}s）`);
+      break;
+    case 'speaker_update':
+      msg.data.segment_ids.forEach(id => {
+        const seg = segments.find(s => s.segment_id === id);
+        if (seg) seg.speaker_name = msg.data.name;
+        updateSpeakerLabel(id, msg.data.name);
+      });
+      showToast(`已更新 ${msg.data.segment_ids.length} 句發言 → ${msg.data.name}`);
+      break;
+    case 'summary':
+      renderSummary(msg.data);
+      break;
+    case 'error':
+      showToast(`⚠️ ${msg.data.message}`, 5000);
+      break;
+  }
+}
+
+// ── 狀態顯示 ─────────────────────────────────
+const STATUS_LABEL = { running: '監控中', analyzing: '生成摘要中...', stopped: '待機' };
+function setStatus(s) {
+  const dot  = document.getElementById('status-dot');
+  const text = document.getElementById('status-text');
+  dot.className = s === 'running' ? 'running'
+                : s === 'analyzing' ? 'analyzing' : 'stopped';
+  text.textContent = STATUS_LABEL[s] || s;
+
+  const running = s === 'running';
+  document.getElementById('btn-start').disabled = running;
+  document.getElementById('btn-stop').disabled  = !running;
+}
+
+// ── 監控控制 ─────────────────────────────────
+async function startMonitor() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) { showToast('請輸入 YouTube 網址'); return; }
+  clearAll(false);
+  const res = await fetch('/api/monitor/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url}),
+  });
+  const data = await res.json();
+  if (!data.ok) showToast(`⚠️ ${data.error}`);
+}
+
+async function stopMonitor() {
+  await fetch('/api/monitor/stop', {method: 'POST'});
+}
+
+function clearAll(clearUrl = true) {
+  segments = [];
+  sessions = [];
+  document.getElementById('transcript-list').innerHTML = '';
+  document.getElementById('sessions-list').innerHTML =
+    '<div class="empty-hint">等待質詢 session 觸發<br>偵測到局長 / 院長被質詢時<br>自動開始記錄</div>';
+  updateSegmentCount();
+  updateSessionCount();
+  if (clearUrl) document.getElementById('url-input').value = '';
+}
+
+// ── 逐字稿渲染 ────────────────────────────────
+function fmtTime(sec) {
+  if (!sec && sec !== 0) return '??:??';
+  const s = Math.floor(sec);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const mm = String(m).padStart(2, '0'), sss = String(ss).padStart(2, '0');
+  return h ? `${h}:${mm}:${sss}` : `${mm}:${sss}`;
+}
+
+function roleClass(role) {
+  return { '議員': 'role-councilor', '官員': 'role-official', '主席': 'role-chair' }[role] || 'role-unknown';
+}
+
+function speakerLabel(seg) {
+  return seg.speaker_name || seg.role || '不明';
+}
+
+function makeSegmentRow(seg) {
+  const row = document.createElement('div');
+  row.className = 'seg-row';
+  row.dataset.id = seg.segment_id;
+
+  const time = document.createElement('span');
+  time.className = 'seg-time';
+  time.textContent = fmtTime(seg.start);
+
+  const spk = document.createElement('span');
+  spk.className = `seg-speaker ${seg.speaker_name ? 'named' : roleClass(seg.role)}`;
+  spk.dataset.id = seg.segment_id;
+  spk.textContent = speakerLabel(seg);
+  spk.title = '點擊編輯說話者';
+  spk.onclick = () => editSpeaker(seg.segment_id, spk);
+
+  const txt = document.createElement('span');
+  txt.className = 'seg-text';
+  // 低信心詞標記
+  if (seg.low_conf_words && seg.low_conf_words.length) {
+    let t = seg.text;
+    seg.low_conf_words.forEach(w => {
+      t = t.replaceAll(w, `<span class="low-conf" title="低信心">${w}</span>`);
+    });
+    txt.innerHTML = t;
+  } else {
+    txt.textContent = seg.text;
+  }
+
+  row.appendChild(time);
+  row.appendChild(spk);
+  row.appendChild(txt);
+  return row;
+}
+
+function appendSegmentRow(seg) {
+  const list = document.getElementById('transcript-list');
+  // 移除空白提示
+  const hint = list.querySelector('.empty-hint');
+  if (hint) hint.remove();
+  list.appendChild(makeSegmentRow(seg));
+}
+
+function rebuildTranscript() {
+  const list = document.getElementById('transcript-list');
+  list.innerHTML = '';
+  if (!segments.length) return;
+  segments.forEach(seg => list.appendChild(makeSegmentRow(seg)));
+  updateSegmentCount();
+  scrollToBottom();
+}
+
+function updateSpeakerLabel(segId, name) {
+  const spk = document.querySelector(`.seg-speaker[data-id="${segId}"]`);
+  if (!spk) return;
+  spk.textContent = name;
+  spk.className = 'seg-speaker named';
+}
+
+function updateSegmentCount() {
+  document.getElementById('segment-count').textContent = `${segments.length} 段`;
+}
+
+// ── 說話者編輯 ────────────────────────────────
+function editSpeaker(segId, spkEl) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'seg-speaker-input';
+  input.value = spkEl.textContent === '不明' ? '' : spkEl.textContent;
+  input.placeholder = '輸入姓名';
+
+  spkEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const commit = async () => {
+    const name = input.value.trim();
+    if (!name) {
+      // 取消：還原原本標籤
+      input.replaceWith(spkEl);
+      return;
+    }
+    // 套用到整個 group
+    const res = await fetch('/api/speaker', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({segment_id: segId, name, apply_to_group: true}),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      input.replaceWith(spkEl);
+      showToast('更新失敗');
+    }
+    // 成功後由 WebSocket speaker_update 事件更新 UI
+    // 先把當前 input 換回 span（會被 speaker_update 事件覆蓋正確值）
+    input.replaceWith(spkEl);
+  };
+
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') input.replaceWith(spkEl);
+  };
+  input.onblur = commit;
+}
+
+// ── Sessions 渲染 ─────────────────────────────
+function makeSessionCard(session) {
+  const card = document.createElement('div');
+  card.className = 'session-card';
+  card.dataset.sessionId = session.session_id;
+
+  const sid = session.session_id;
+  const vStart = fmtTime(session.video_start_sec);
+  const vEnd   = fmtTime(session.video_end_sec);
+  const dur    = session.duration_sec ? `${session.duration_sec}s` : '';
+
+  card.innerHTML = `
+    <div class="session-card-header">
+      <span class="session-num">#${sid + 1}</span>
+      <span class="session-time">${session.timestamp || ''}</span>
+    </div>
+    <div class="session-meta">
+      <span>⏱ ${vStart} – ${vEnd}</span>
+      <span>${dur}</span>
+      <span>${session.chunk_count || 0} 段逐字稿</span>
+    </div>
+    <div class="session-summary-area"></div>
+    <button class="btn-summary" onclick="requestSummary(${sid}, this)">
+      ✨ 生成摘要
+    </button>
+  `;
+
+  // 如果已有摘要（頁面重載後恢復）
+  if (session.summary) {
+    renderSummaryInCard(card.querySelector('.session-summary-area'), session.summary);
+    card.querySelector('.btn-summary').style.display = 'none';
+  }
+
+  return card;
+}
+
+function appendSessionCard(session) {
+  const list = document.getElementById('sessions-list');
+  const hint = list.querySelector('.empty-hint');
+  if (hint) hint.remove();
+  list.appendChild(makeSessionCard(session));
+  updateSessionCount();
+}
+
+function rebuildSessions() {
+  const list = document.getElementById('sessions-list');
+  list.innerHTML = '';
+  if (!sessions.length) {
+    list.innerHTML = '<div class="empty-hint">等待質詢 session 觸發<br>偵測到局長 / 院長被質詢時<br>自動開始記錄</div>';
+    updateSessionCount();
+    return;
+  }
+  sessions.forEach(s => list.appendChild(makeSessionCard(s)));
+  updateSessionCount();
+}
+
+function updateSessionCount() {
+  document.getElementById('session-count').textContent = `${sessions.length} 筆`;
+}
+
+async function requestSummary(sessionId, btn) {
+  btn.disabled = true;
+  btn.textContent = '生成中...';
+  btn.classList.add('loading');
+  const res = await fetch('/api/summary', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({session_id: sessionId}),
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    showToast(`⚠️ ${data.error}`);
+    btn.disabled = false;
+    btn.textContent = '✨ 生成摘要';
+    btn.classList.remove('loading');
+  }
+  // 成功後由 WebSocket summary 事件更新 UI
+}
+
+function renderSummary(data) {
+  const card = document.querySelector(`.session-card[data-session-id="${data.session_id}"]`);
+  if (!card) return;
+  const area = card.querySelector('.session-summary-area');
+  renderSummaryInCard(area, data);
+  const btn = card.querySelector('.btn-summary');
+  if (btn) btn.style.display = 'none';
+  // 同步到 sessions 陣列
+  const s = sessions.find(s => s.session_id === data.session_id);
+  if (s) s.summary = data;
+}
+
+function renderSummaryInCard(area, d) {
+  const urgencyClass = `urgency-${d['緊急程度']}`;
+  const commitments = (d['承諾事項'] || []).map(c => `<li>${c}</li>`).join('');
+  const todos = (d['待辦追蹤'] || []).map(t => `<li>${t}</li>`).join('');
+  const primary = (d['主責單位'] || []).join('、') || '—';
+  const secondary = (d['協辦單位'] || []).join('、') || '—';
+
+  area.innerHTML = `
+    <div class="summary-box">
+      <h4>${d['質詢主題'] || '（主題未識別）'}</h4>
+      <div><span class="label">議員　</span><span class="value">${d['議員姓名'] || '—'}</span>
+           <span class="label" style="margin-left:12px">對象　</span><span class="value">${d['質詢對象'] || '—'}</span>
+           <span class="label" style="margin-left:12px">緊急　</span><span class="value ${urgencyClass}">${d['緊急程度'] || '—'}</span></div>
+      <div style="margin-top:6px"><span class="label">摘要　</span><span class="value">${d['質詢摘要'] || '—'}</span></div>
+      ${d['局方回應'] ? `<div style="margin-top:4px"><span class="label">回應　</span><span class="value">${d['局方回應']}</span></div>` : ''}
+      ${commitments ? `<div style="margin-top:6px"><span class="label">承諾事項</span><ul style="margin-top:2px">${commitments}</ul></div>` : ''}
+      ${todos ? `<div style="margin-top:4px"><span class="label">待辦追蹤</span><ul style="margin-top:2px">${todos}</ul></div>` : ''}
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--gray-3)">
+        <span class="label">主責　</span><span class="value">${primary}</span><br>
+        ${secondary !== '—' ? `<span class="label">協辦　</span><span class="value">${secondary}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+// ── Auto scroll ───────────────────────────────
+function scrollToBottom() {
+  const list = document.getElementById('transcript-list');
+  list.scrollTop = list.scrollHeight;
+}
+
+document.getElementById('transcript-list').addEventListener('scroll', function() {
+  const el = this;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  autoScroll = atBottom;
+  document.getElementById('auto-scroll-btn').classList.toggle('visible', !atBottom);
+});
+
+// ── Toast ─────────────────────────────────────
+let toastTimer = null;
+function showToast(msg, ms = 2500) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+// ── 初始化 ────────────────────────────────────
+connectWS();
+</script>
+</body>
+</html>

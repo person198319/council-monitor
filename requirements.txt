@@ -17,3 +17,7 @@ requests>=2.31.0        # LINE Notify
 
 # 工具
 loguru>=0.7.0           # 結構化 logging
+
+# Web 服務
+fastapi>=0.111.0
+uvicorn>=0.30.0
